@@ -20,9 +20,6 @@ def get_records(do_token, hostname, dns_domain, rtype):
     return [rcrd for rcrd in jsondata['domain_records'] if rcrd['name'] == hostname and rcrd['type'] == rtype]
 
 
-# def update_record(do_token, hostname, dns_domain, rtype, data):
-#    print(do_token, hostname, dns_domain, rtype, data)
-
 def update_record(do_token, record_id, hostname, dns_domain, rtype, data):
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {do_token}'}
     # need to use double brackets to get single brackets within a formatted string
@@ -31,6 +28,7 @@ def update_record(do_token, record_id, hostname, dns_domain, rtype, data):
                                          headers=headers, method='PUT', data=http_body.encode('utf-8'))
     return urllib.request.urlopen(api_request).read()
 
+
 def create_record(do_token, hostname, dns_domain, rtype, data):
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {do_token}'}
     # need to use double brackets to get single brackets within a formatted string
@@ -38,6 +36,7 @@ def create_record(do_token, hostname, dns_domain, rtype, data):
     api_request = urllib.request.Request(f'https://api.digitalocean.com/v2/domains/{dns_domain}/records',
                                          headers=headers, method='POST', data=http_body.encode('utf-8'))
     return urllib.request.urlopen(api_request).read()
+
 
 parser = argparse.ArgumentParser(description='update DigitalOcean dns record')
 parser.add_argument('--token', metavar='your_token', type=str, required=True, help='DO API token')
@@ -51,6 +50,8 @@ def cli_interface():
     try:
         cliargs = parser.parse_args()
         hostname, dns_domain = cliargs.fqdn.split('.', maxsplit=1)
+        assert (hostname), 'hostname part of fqdn seems to be empty, check your input'
+        assert (dns_domain), 'domain part of fqdn seems to be empty, check your input'
         logger.info(f'set {cliargs.type} record for hostname {hostname} in domain {dns_domain} to {cliargs.data}')
         records = get_records(do_token=cliargs.token, hostname=hostname, dns_domain=dns_domain, rtype=cliargs.type)
         if records:
