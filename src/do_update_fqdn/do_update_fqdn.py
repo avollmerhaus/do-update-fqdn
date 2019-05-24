@@ -10,14 +10,24 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s: %(message)
                     handlers=[logging.StreamHandler(sys.stdout)])
 logger = logging.getLogger('do-update-fqdn')
 
-
-def get_records(do_token, hostname, dns_domain, rtype):
+def _get_api_response_pages(do_token, url):
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {do_token}'}
-    api_request = urllib.request.Request(f'https://api.digitalocean.com/v2/domains/{dns_domain}/records',
-                                         headers=headers)
-    api_response = urllib.request.urlopen(api_request).read()
-    jsondata = json.loads(api_response.decode('utf-8'))
-    return [rcrd for rcrd in jsondata['domain_records'] if rcrd['name'] == hostname and rcrd['type'] == rtype]
+    while url:
+        api_request = urllib.request.Request(url, headers=headers)
+        api_response = urllib.request.urlopen(api_request).read()
+        jsondata = json.loads(api_response.decode('utf-8'))
+        try:
+            url = jsondata['links']['pages']['next']
+        except KeyError:
+            url = None
+        yield jsondata
+
+def get_records_by_hostname(do_token, hostname, dns_domain, rtype):
+    url = f'https://api.digitalocean.com/v2/domains/{dns_domain}/records'
+    for rpage in _get_api_response_pages(do_token, url):
+        for do_api_record in rpage['domain_records']:
+            if do_api_record['name'] == hostname and do_api_record['type'] == rtype:
+                yield do_api_record
 
 
 def update_record(do_token, record_id, hostname, dns_domain, rtype, data):
@@ -53,18 +63,18 @@ def cli_interface():
         assert (hostname), 'hostname part of fqdn seems to be empty, check your input'
         assert (dns_domain), 'domain part of fqdn seems to be empty, check your input'
         logger.info(f'set {cliargs.type} record for hostname {hostname} in domain {dns_domain} to {cliargs.data}')
-        records = get_records(do_token=cliargs.token, hostname=hostname, dns_domain=dns_domain, rtype=cliargs.type)
-        if records:
-            for record in records:
-                this_record_id = record['id']
-                this_hostname = record['name']
-                this_rtype = record['type']
-                logger.info(f'updating record with DO id {this_record_id}')
-                update_record(cliargs.token, this_record_id, this_hostname, dns_domain, this_rtype, cliargs.data)
-            exitcode = 0
-        else:
+
+        updated_records = []
+        for record in get_records_by_hostname(cliargs.token, hostname, dns_domain, cliargs.type):
+            logger.info('updating record with DO id %s', record['id'])
+            update_record(cliargs.token, record['id'], record['name'], dns_domain, record['type'], cliargs.data)
+            updated_records.append(record)
+        if len(updated_records) > 1:
+            logger.warning(f'warning, multiple records found for {hostname}! updated all of them')
+        if len(updated_records) == 0:
             logger.info(f'no {cliargs.type} records found in {dns_domain} for hostname {hostname}, creating')
             create_record(cliargs.token, hostname, dns_domain, cliargs.type, cliargs.data)
+        exitcode = 0
 
     except urllib.error.HTTPError as err:
         logger.info(f'DO API did not cooperate, error was {err}')
