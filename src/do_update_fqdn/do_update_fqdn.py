@@ -10,6 +10,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s: %(message)
                     handlers=[logging.StreamHandler(sys.stdout)])
 logger = logging.getLogger('do-update-fqdn')
 
+
 def _get_api_response_pages(do_token, url):
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {do_token}'}
     while url:
@@ -22,6 +23,7 @@ def _get_api_response_pages(do_token, url):
             url = None
         yield jsondata
 
+
 def get_records_by_hostname(do_token, hostname, dns_domain, rtype):
     url = f'https://api.digitalocean.com/v2/domains/{dns_domain}/records'
     for rpage in _get_api_response_pages(do_token, url):
@@ -30,19 +32,19 @@ def get_records_by_hostname(do_token, hostname, dns_domain, rtype):
                 yield do_api_record
 
 
-def update_record(do_token, record_id, hostname, dns_domain, rtype, data):
+def update_record(do_token, record_id, hostname, dns_domain, rtype, data, ttl):
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {do_token}'}
     # need to use double brackets to get single brackets within a formatted string
-    http_body = f'{{"name": "{hostname}", "type": "{rtype}", "data": "{data}"}}'
+    http_body = f'{{"name": "{hostname}", "type": "{rtype}", "data": "{data}", "ttl": "{ttl}"}}'
     api_request = urllib.request.Request(f'https://api.digitalocean.com/v2/domains/{dns_domain}/records/{record_id}',
                                          headers=headers, method='PUT', data=http_body.encode('utf-8'))
     return urllib.request.urlopen(api_request).read()
 
 
-def create_record(do_token, hostname, dns_domain, rtype, data):
+def create_record(do_token, hostname, dns_domain, rtype, data, ttl):
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {do_token}'}
     # need to use double brackets to get single brackets within a formatted string
-    http_body = f'{{"name": "{hostname}", "type": "{rtype}", "data": "{data}"}}'
+    http_body = f'{{"name": "{hostname}", "type": "{rtype}", "data": "{data}", "ttl": "{ttl}"}}'
     api_request = urllib.request.Request(f'https://api.digitalocean.com/v2/domains/{dns_domain}/records',
                                          headers=headers, method='POST', data=http_body.encode('utf-8'))
     return urllib.request.urlopen(api_request).read()
@@ -52,13 +54,17 @@ parser = argparse.ArgumentParser(description='update DigitalOcean dns record')
 parser.add_argument('--token', metavar='your_token', type=str, required=True, help='DO API token')
 parser.add_argument('--fqdn', metavar='foo.example.com', type=str, required=True, help='fqdn that should be updated')
 parser.add_argument('--type', metavar='type', type=str, required=True, help='A or AAAA or whatever')
-parser.add_argument('--data', metavar='IP or other data', type=str, required=True, help='content for the record')
+parser.add_argument('--ttl', metavar='30', type=int, required=False, default=30, help='30 is default and minimum at DO')
+parser.add_argument('--data', metavar='IP or whatever', type=str, required=True, help='content for the record')
 
 
 def cli_interface():
     exitcode = 255
+    # the parser raises SystemExit when used with --help or nonsense-parameters.
+    # catching that inside the blanket-except down there does not make sense,
+    # and I don't want to catch other, possibly unknown occurrences of SystemExit.
+    cliargs = parser.parse_args()
     try:
-        cliargs = parser.parse_args()
         hostname, dns_domain = cliargs.fqdn.split('.', maxsplit=1)
         assert (hostname), 'hostname part of fqdn seems to be empty, check your input'
         assert (dns_domain), 'domain part of fqdn seems to be empty, check your input'
@@ -67,13 +73,14 @@ def cli_interface():
         updated_records = []
         for record in get_records_by_hostname(cliargs.token, hostname, dns_domain, cliargs.type):
             logger.info('updating record with DO id %s', record['id'])
-            update_record(cliargs.token, record['id'], record['name'], dns_domain, record['type'], cliargs.data)
+            update_record(cliargs.token, record['id'], record['name'], dns_domain, record['type'], cliargs.data,
+                          cliargs.ttl)
             updated_records.append(record)
         if len(updated_records) > 1:
             logger.warning(f'warning, multiple records found for {hostname}! updated all of them')
         if len(updated_records) == 0:
             logger.info(f'no {cliargs.type} records found in {dns_domain} for hostname {hostname}, creating')
-            create_record(cliargs.token, hostname, dns_domain, cliargs.type, cliargs.data)
+            create_record(cliargs.token, hostname, dns_domain, cliargs.type, cliargs.data, cliargs.ttl)
         exitcode = 0
 
     except urllib.error.HTTPError as err:

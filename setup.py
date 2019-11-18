@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="do-update-fqdn",
-    version="0.0.3",
+    version="0.1.0",
     author="Aljoscha Vollmerhaus",
     author_email='pydev@aljoscha.vollmerhaus.net',
     description="Update or create a dns record through the DigitalOcean API.",
